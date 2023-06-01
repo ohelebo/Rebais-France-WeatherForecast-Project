@@ -423,32 +423,6 @@ ggplot(data_long, aes(x = Variable, y = Value, fill = Variable)) +
             size = 4)
 ```
 
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
 ```
 
 ```{r}
