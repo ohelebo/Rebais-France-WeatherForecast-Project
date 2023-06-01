@@ -1,0 +1,460 @@
+---
+title: "RebaisWeather"
+author: "Aimakhede Samuel"
+date: "2023-05-14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r}
+getwd()
+setwd("C:/Users/HP/Documents/R Assignments/Assessment 2/SAM")
+```
+
+```{r}
+#read Rebais data into R
+data <- read.csv(file.choose())
+```
+
+```{r}
+#check data head
+head(data, n = 5)
+```
+
+```{r}
+#Install time series analysis tools and libraries (ARIMA, SVR, Linear Regression with TS, and Random Forest).
+library(tseries)
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+library(gridExtra)
+library(dplyr)
+library(forecast)
+```
+
+```{r}
+#View data TSK distribution/trend using box plot or different plots
+boxplot(data$TSK) 
+#plot(data$TSK)
+#hist(data$TSK)
+#plot(density(data$TSK))
+#visualisations show there are no outliers in the TSK column
+```
+
+```{r}
+#get summary of the TSK column to see the distribution of the data
+summary(data$TSK)
+```
+
+```{r}
+#get structure of the dataframe
+str(data)
+#The structure output revealed that the DateTime column is a character (chr), therefore we need to standardize it to the date/time format for timeseries analysis
+```
+
+```{r}
+#convert into standard date format using POSIXct function to keep the time.
+data$Date.Time <- as.POSIXct(data$Date.Time, format = "%d.%m.%Y.%H.%M")
+```
+
+```{r}
+#validate that the time has been changed from chr to standard datetime (POSIXt)
+class(data$Date.Time)
+```
+```{r}
+#Check new format
+str(data$Date.Time)
+```
+
+```{r}
+#create a copy of the standardized data so it can be used for ARIMA and the ML analysis
+dataY <- data
+```
+
+```{r}
+#Create Separate columns for year, month, day and hour
+data$Year <- as.numeric(format(data$Date.Time, "%Y"))
+data$Month <- as.numeric(format(data$Date.Time, "%m"))
+data$Day <- as.numeric(format(data$Date.Time, "%d"))
+data$Hour <- as.numeric(format(data$Date.Time, "%H"))
+```
+
+```{r}
+#drop unnecessary columns for the ARIMA analysis
+data <- data%>% select(-Date.Time)
+```
+
+```{r}
+#compare data and dataY
+View(data)
+View(dataY)
+```
+
+```{r}
+#Change the data to a Timeseries Object for ARIMA
+ts_data <- ts(data$TSK, start = c(2018,1), frequency = 8 * 31)
+View(ts_data)
+```
+
+```{r}
+#Check data Stationarity
+#If the "P.value" of the data is less than 0.05, then the data is stationary. Else the data is not
+adf.test(ts_data) 
+#The result confirmed that this data is not stationary.
+```
+
+```{r}
+#Separate the dataset into training and testing set
+set.seed(25)
+train_end <- floor(0.8 * length(ts_data))
+train_data <- ts_data[1:train_end]
+test_data <- ts_data[(train_end + 1): length(ts_data)]
+```
+
+```{r}
+#Fit the Arima model into the training data
+#use the auto.arima() function to automatically select the best ARIMA model based on the raining data
+arima_model <- auto.arima(train_data, stepwise = TRUE)
+#seasonality hyperparameter will not be included because the data is not up to a year neither does it show any similar repeated pattern
+```
+
+```{r}
+#Forecast using the ARIMA model
+arima_forecast <- forecast(arima_model, h = length(test_data))
+arima_forecast
+```
+
+```{r}
+#To get summary of the model, use the print function. The model summary provides information about the selected ARIMA parameters (p, d, q), the coefficients of the model, the standard errors of the coefficients, and the goodness-of-fit statistics such as the log-likelihood, AIC, and BIC values.
+print(arima_model)
+```
+
+```{r}
+#calculate the mean absolute error of the model
+Arima.MAE <- mean(abs(test_data - arima_forecast$mean))
+cat("The MAE for ARIMA is:", Arima.MAE)
+```
+
+```{r}
+#Check the model residuals
+checkresiduals(arima_model)
+```
+
+```{r}
+#plot histogram of ARIMA model residuals
+hist(arima_model$residuals, main = "Histogram showing ARIMA Model residuals", xlab = "model Residuals", col = "purple")
+```
+
+```{r}
+#Using the BOX TEST to validate the ARIMA Model Forecast
+plot(arima_forecast)
+Box.test(arima_forecast$residuals, lag = 10, type = "Ljung-Box")
+```
+
+```{r}
+#MACHINE LEARNING FORECASTING MODELS (LINEAR TS, SVR & RANDOM FOREST)
+#The machine learning models will be using the TIME STEP approach as the time register.
+#Remove unnecessary columns from data1: We use the select() function from the dplyr package (included in tidyverse)
+#
+data <- dataY
+```
+
+```{r}
+# Time series plot of temperature TSK over TIME
+ggplot(data, aes(x = Date.Time, y = TSK)) +
+  geom_line(color = "brown") +
+  labs(title = "Temperature changes Over Time",
+       x = "Date and Time",
+       y = "Temperature") +
+  theme_minimal()
+```
+
+```{r}
+#TIME STEP for ML timeseries models
+# Create a time variable (in the format of Time Step): To use linear regression, we need a numeric variable representing time. 
+#We create a new column called time by calculating the time difference (in hours) between each observation's datetime and the minimum datetime in the dataset. This time difference will be the TIME STEP 
+#We use the as.numeric() function to convert the time difference to a numeric value representing the number of hours.
+
+data <- data %>%
+  mutate(TIME = as.numeric(difftime(Date.Time, min(Date.Time), units = "hours"))) %>%
+  select(TIME, TSK)
+#time is now in TIME STEP
+View(data)
+```
+
+```{r}
+#split the dataset into training and testing for use with the other ML models
+set.seed(30)
+train_indices <- sample(1:nrow(data), 0.8 * nrow(data))
+train_data <- data[train_indices, ]
+test_data <- data[-train_indices, ]
+str(train_data)
+str(test_data)
+```
+
+```{r}
+#LINEAR REGRESSION MODEL LR
+# Fit the model on the training set
+train_model <- lm(TSK ~ TIME, data = train_data)
+summary(train_model)
+```
+
+```{r}
+# Predict Temperature values for the test set
+predictions <- predict(train_model, newdata = test_data)
+```
+
+```{r}
+# Calculate the mean absolute error (MAE) of the model
+LR.MAE <- mean(abs(predictions - test_data$TSK))
+cat("MAE:", LR.MAE)
+```
+
+```{r}
+#Plot Actual vs Predicted values
+ggplot() +
+  geom_point(data = test_data, aes(x = TSK, y = predictions), color = "grey") +
+  geom_abline(slope = 1, intercept = 0, color = "brown") +
+  labs(title = "Actual vs. Predicted Temperature",
+       x = "Actual Temperature",
+       y = "Predicted Temperature") +
+  theme_minimal()
+```
+
+```{r}
+# USING Support Vector Regression Model (SVR)
+#Time Series Univariate Analysis using Support Vector Regression
+#1.	Install the 'e1071' package
+library(e1071)
+```
+
+```{r}
+#Build the SVR model with 3 different Kernels (Linear, Radial and Polynomial)
+```
+
+```{r}
+# Fit SVR model on the training set using LINEAR Kernel
+svr_model <- svm(TSK ~ TIME, data = train_data, kernel = "linear")
+svr_predictions_linear <- predict(svr_model, newdata = test_data)
+SVR.MAE_linear <- mean(abs(svr_predictions_linear - test_data$TSK))
+cat("SVR MAE With Linear Kernel:", SVR.MAE_linear)
+```
+
+```{r}
+# Fit an SVR model on the training set using RBF Kernel
+svr_model <- svm(TSK ~ TIME, data = train_data, kernel = "polynomial")
+# Predict Pressure values for the test set using the SVR model
+svr_predictions_poly <- predict(svr_model, newdata = test_data)
+# Calculate the mean absolute error (MAE) for the SVR model
+SVR.MAE_poly <- mean(abs(svr_predictions_poly - test_data$TSK))
+cat("SVR MAE With Polynomial kernel:", SVR.MAE_poly)
+```
+```{r}
+# Fit an SVR model on the training set using RBF Kernel
+svr_model <- svm(TSK ~ TIME, data = train_data, kernel = "radial")
+# Predict Pressure values for the test set using the SVR model
+svr_predictions_radial <- predict(svr_model, newdata = test_data)
+# Calculate the mean absolute error (MAE) for the SVR model
+SVR.MAE_radial <- mean(abs(svr_predictions_radial - test_data$TSK))
+cat("SVR MAE With Radial Kernel:", SVR.MAE_radial)
+```
+
+```{r}
+cat("\nSVR MAE Linear:", SVR.MAE_linear, "MAE POLY:", SVR.MAE_poly,"MAE Radial:", SVR.MAE_radial)
+#Radial(RBF) has the least MAE
+```
+```{r}
+#SVR kernel erros comparism
+# Plot the actual vs. predicted values for the different kernels
+s1 <- ggplot() +
+  geom_point(data = test_data, aes(x = TSK, y = svr_predictions_linear), color = "blue") +
+  geom_abline(slope = 1, intercept = 0, color = "black") +
+  labs(title = "SVR Linear Regression",
+       x = "Actual Temp. Values",
+       y = "Predicted Temp. Values") +
+  theme_minimal()
+
+s2 <- ggplot() +
+  geom_point(data = test_data, aes(x = TSK, y = svr_predictions_poly), color = "blue") +
+  geom_abline(slope = 1, intercept = 0, color = "black") +
+  labs(title = "SVR POLY",
+       x = "Actual Temp. Values",
+       y = "Predicted Temp. Values") +
+  theme_minimal()
+
+s3 <- ggplot() +
+  geom_point(data = test_data, aes(x = TSK, y = svr_predictions_radial), color = "blue") +
+  geom_abline(slope = 1, intercept = 0, color = "black") +
+  labs(title = "SVR Radial Forest",
+       x = "Actual Temp. Values",
+       y = "Predicted Temp. Values") +
+  theme_minimal()
+
+grid.arrange(s1, s2, s3, ncol = 3)
+```
+
+```{r}
+#TS ANALYSIS USING RANDOM FOREST (RF)
+#Install and load the necessary libraries for RF
+#install.packages("randomForest")
+library(randomForest)
+```
+
+```{r}
+#Build the Random Forest models with multiple number of trees (ntrees)
+# Fit a Random Forest model on the training set
+rf_model_100 <- randomForest(TSK ~ TIME, data = train_data, ntree = 100)
+rf_model_200 <- randomForest(TSK ~ TIME, data = train_data, ntree = 200)
+rf_model_500 <- randomForest(TSK ~ TIME, data = train_data, ntree = 500)
+#NB: In empirical evaluations, you can try with different values of ntree, 
+#such as 100, 200, and 500 for ntree hyperparameter
+```
+
+```{r}
+# Display the Random Forest model summary
+summary(rf_model_100)
+summary(rf_model_200)
+summary(rf_model_500)
+```
+
+```{r}
+# Predict Temperature values for the test set using the Random Forest model
+rf_predictions_100 <- predict(rf_model_100, newdata = test_data)
+rf_predictions_200 <- predict(rf_model_200, newdata = test_data)
+rf_predictions_500 <- predict(rf_model_500, newdata = test_data)
+```
+
+```{r}
+# Calculate the mean absolute error (MAE) for the RF model1
+RF.MAE_100 <- mean(abs(rf_predictions_100 - test_data$TSK))
+cat("Random Forest MAE with nTree 100:", RF.MAE_100)
+# Calculate the mean absolute error (MAE) for the RF model2
+RF.MAE_200 <- mean(abs(rf_predictions_200 - test_data$TSK))
+cat("Random Forest MAE with nTree 200:", RF.MAE_200)
+# Calculate the mean absolute error (MAE) for the RF model3
+RF.MAE_500 <- mean(abs(rf_predictions_500 - test_data$TSK))
+cat("Random Forest MAE with nTree 500:", RF.MAE_500)
+```
+```{r}
+#RF ntree results comparison
+# Plot the actual vs. predicted values for ntree 100, 200 and 500
+r1 <- ggplot() +
+  geom_point(data = test_data, aes(x = TSK, y = rf_predictions_100), color = "brown") +
+  geom_abline(slope = 1, intercept = 0, color = "black") +
+  labs(title = "ntree 100",
+       x = "Actual Temp. Values",
+       y = "Predicted Temp. Values") +
+  theme_minimal()
+
+r2 <- ggplot() +
+  geom_point(data = test_data, aes(x = TSK, y = rf_predictions_200), color = "brown") +
+  geom_abline(slope = 1, intercept = 0, color = "black") +
+  labs(title = "ntree 200",
+       x = "Actual Temp. Values",
+       y = "Predicted Temp. Values") +
+  theme_minimal()
+
+r3 <- ggplot() +
+  geom_point(data = test_data, aes(x = TSK, y = rf_predictions_500), color = "brown") +
+  geom_abline(slope = 1, intercept = 0, color = "black") +
+  labs(title = "ntree 500",
+       x = "Actual Temp. Values",
+       y = "Predicted Temp. Values") +
+  theme_minimal()
+
+grid.arrange(r1, r2, r3, ncol = 3)
+```
+
+```{r}
+#MODEL EVALUATION AND COMPARISM
+# Plot the actual vs. predicted values for the Linear Regression, SVR, and Random Forest models
+p1 <- ggplot() +
+  geom_point(data = test_data, aes(x = TSK, y = predictions), color = "brown") +
+  geom_abline(slope = 1, intercept = 0, color = "green") +
+  labs(title = "Linear Regression",
+       x = "Actual Temp. Values",
+       y = "Predicted Temp. Values") +
+  theme_minimal()
+
+p2 <- ggplot() +
+  geom_point(data = test_data, aes(x = TSK, y = svr_predictions_radial), color = "brown") +
+  geom_abline(slope = 1, intercept = 0, color = "green") +
+  labs(title = "SVR",
+       x = "Actual Temp. Values",
+       y = "Predicted Temp. Values") +
+  theme_minimal()
+
+p3 <- ggplot() +
+  geom_point(data = test_data, aes(x = TSK, y = rf_predictions_500), color = "brown") +
+  geom_abline(slope = 1, intercept = 0, color = "green") +
+  labs(title = "Random Forest",
+       x = "Actual Temp. Values",
+       y = "Predicted Temp. Values") +
+  theme_minimal()
+
+grid.arrange(p1, p2, p3, ncol = 3)
+```
+
+```{r}
+#Random Forest has the least MAE hence it is the best model for this prediction/analysis
+#Linear Regression MAE: 
+#SVR MAE: 
+#Random Forest MAE: 
+```
+
+```{r}
+#Compare and barplot results of all models
+# Create a data frame with three variables
+MAEs <- data.frame(Arima.MAE,LR.MAE, SVR.MAE_radial, RF.MAE_500)
+# Reshape the data frame into long format
+data_long <- gather(MAEs, key = "Variable", value = "Value")
+
+# Create the box plot
+ggplot(data_long, aes(x = Variable, y = Value, fill = Variable)) +
+  geom_col() +
+  labs(title = "Box Plot of Mean Absolute Errors (MAE)",
+       x = "Models",
+       y = "MAE Error Values") +
+  geom_text(aes(label = round(Value,3)), 
+            vjust = -0.5, 
+            color = "black", 
+            size = 4)
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
